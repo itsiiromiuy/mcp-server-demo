@@ -1,228 +1,107 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-const NWS_API_BASE = "https://api.weather.gov";
-const USER_AGENT = "weather-app/1.0";
+// 定义天气数据类型
+type WeatherData = {
+  temperature: number;
+  humidity: number;
+  condition: string;
+  windSpeed: number;
+};
 
-// Helper function for making NWS API requests
-async function makeNWSRequest<T>(url: string): Promise<T | null> {
-  const headers = {
-    "User-Agent": USER_AGENT,
-    Accept: "application/geo+json",
-  };
+type WeatherDatabase = {
+  [city: string]: WeatherData;
+};
 
-  try {
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return (await response.json()) as T;
-  } catch (error) {
-    console.error("Error making NWS request:", error);
-    return null;
-  }
-}
+// 模拟天气数据
+const mockWeatherData: WeatherDatabase = {
+  tokyo: {
+    temperature: 20,
+    humidity: 65,
+    condition: "sunny",
+    windSpeed: 10,
+  },
+  osaka: {
+    temperature: 22,
+    humidity: 70,
+    condition: "cloudy",
+    windSpeed: 8,
+  },
+  kyoto: {
+    temperature: 19,
+    humidity: 75,
+    condition: "rainy",
+    windSpeed: 12,
+  },
+};
 
-interface AlertFeature {
-  properties: {
-    event?: string;
-    areaDesc?: string;
-    severity?: string;
-    status?: string;
-    headline?: string;
-  };
-}
-
-// Format alert data
-function formatAlert(feature: AlertFeature): string {
-  const props = feature.properties;
-  return [
-    `Event: ${props.event || "Unknown"}`,
-    `Area: ${props.areaDesc || "Unknown"}`,
-    `Severity: ${props.severity || "Unknown"}`,
-    `Status: ${props.status || "Unknown"}`,
-    `Headline: ${props.headline || "No headline"}`,
-    "---",
-  ].join("\n");
-}
-
-interface ForecastPeriod {
-  name?: string;
-  temperature?: number;
-  temperatureUnit?: string;
-  windSpeed?: string;
-  windDirection?: string;
-  shortForecast?: string;
-}
-
-interface AlertsResponse {
-  features: AlertFeature[];
-}
-
-interface PointsResponse {
-  properties: {
-    forecast?: string;
-  };
-}
-
-interface ForecastResponse {
-  properties: {
-    periods: ForecastPeriod[];
-  };
-}
-
-// Create server instance
 const server = new McpServer({
-  name: "weather",
+  name: "weather-server",
   version: "1.0.0",
 });
 
-// Register weather tools
-server.tool(
-  "get-alerts",
-  "Get weather alerts for a state",
-  {
-    state: z.string().length(2).describe("Two-letter state code (e.g. CA, NY)"),
-  },
-  async ({ state }) => {
-    const stateCode = state.toUpperCase();
-    const alertsUrl = `${NWS_API_BASE}/alerts?area=${stateCode}`;
-    const alertsData = await makeNWSRequest<AlertsResponse>(alertsUrl);
-
-    if (!alertsData) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Failed to retrieve alerts data",
-          },
-        ],
-      };
+// 添加天气资源
+server.resource(
+  "weather",
+  new ResourceTemplate("weather://{city}", { list: undefined }),
+  async (uri, { city }) => {
+    const cityLower = (typeof city === "string" ? city : city[0]).toLowerCase();
+    const cityData = mockWeatherData[cityLower];
+    if (!cityData) {
+      throw new Error(`Weather data not found for city: ${city}`);
     }
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          text: JSON.stringify(cityData, null, 2),
+        },
+      ],
+    };
+  }
+);
 
-    const features = alertsData.features || [];
-    if (features.length === 0) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No active alerts for ${stateCode}`,
-          },
-        ],
-      };
-    }
-
-    const formattedAlerts = features.map(formatAlert);
-    const alertsText = `Active alerts for ${stateCode}:\n\n${formattedAlerts.join("\n")}`;
-
+// 添加获取天气工具
+server.tool("getWeather", { city: z.string() }, async ({ city }) => {
+  const cityData = mockWeatherData[city.toLowerCase()];
+  if (!cityData) {
     return {
       content: [
         {
           type: "text",
-          text: alertsText,
+          text: `Weather data not found for city: ${city}`,
         },
       ],
+      isError: true,
     };
-  },
-);
-
-server.tool(
-  "get-forecast",
-  "Get weather forecast for a location",
-  {
-    latitude: z.number().min(-90).max(90).describe("Latitude of the location"),
-    longitude: z
-      .number()
-      .min(-180)
-      .max(180)
-      .describe("Longitude of the location"),
-  },
-  async ({ latitude, longitude }) => {
-    // Get grid point data
-    const pointsUrl = `${NWS_API_BASE}/points/${latitude.toFixed(4)},${longitude.toFixed(4)}`;
-    const pointsData = await makeNWSRequest<PointsResponse>(pointsUrl);
-
-    if (!pointsData) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Failed to retrieve grid point data for coordinates: ${latitude}, ${longitude}. This location may not be supported by the NWS API (only US locations are supported).`,
-          },
-        ],
-      };
-    }
-
-    const forecastUrl = pointsData.properties?.forecast;
-    if (!forecastUrl) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Failed to get forecast URL from grid point data",
-          },
-        ],
-      };
-    }
-
-    // Get forecast data
-    const forecastData = await makeNWSRequest<ForecastResponse>(forecastUrl);
-    if (!forecastData) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Failed to retrieve forecast data",
-          },
-        ],
-      };
-    }
-
-    const periods = forecastData.properties?.periods || [];
-    if (periods.length === 0) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "No forecast periods available",
-          },
-        ],
-      };
-    }
-
-    // Format forecast periods
-    const formattedForecast = periods.map((period: ForecastPeriod) =>
-      [
-        `${period.name || "Unknown"}:`,
-        `Temperature: ${period.temperature || "Unknown"}°${period.temperatureUnit || "F"}`,
-        `Wind: ${period.windSpeed || "Unknown"} ${period.windDirection || ""}`,
-        `${period.shortForecast || "No forecast available"}`,
-        "---",
-      ].join("\n"),
-    );
-
-    const forecastText = `Forecast for ${latitude}, ${longitude}:\n\n${formattedForecast.join("\n")}`;
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: forecastText,
-        },
-      ],
-    };
-  },
-);
-
-// Start the server
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Weather MCP Server running on stdio");
-}
-
-main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
+  }
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Current weather in ${city}:\nTemperature: ${cityData.temperature}°C\nHumidity: ${cityData.humidity}%\nCondition: ${cityData.condition}\nWind Speed: ${cityData.windSpeed} km/h`,
+      },
+    ],
+  };
 });
+
+// 添加天气提示词
+server.prompt("weatherPrompt", { city: z.string() }, ({ city }) => ({
+  messages: [
+    {
+      role: "user",
+      content: {
+        type: "text",
+        text: `Please provide the weather information for ${city}.`,
+      },
+    },
+  ],
+}));
+
+// 启动服务器
+const transport = new StdioServerTransport();
+await server.connect(transport);
