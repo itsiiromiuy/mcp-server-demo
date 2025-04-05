@@ -68,7 +68,7 @@ class MCPClient {
       });
       console.log(
         "Connected to server with tools:",
-        this.tools.map(({ name }) => name),
+        this.tools.map(({ name }) => name)
       );
     } catch (e) {
       console.log("Failed to connect to MCP server: ", e);
@@ -116,7 +116,7 @@ class MCPClient {
         });
         toolResults.push(result);
         finalText.push(
-          `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`,
+          `[Calling tool ${toolName} with args ${JSON.stringify(toolArgs)}]`
         );
 
         // Continue conversation with tool results
@@ -133,7 +133,7 @@ class MCPClient {
         });
 
         finalText.push(
-          response.content[0].type === "text" ? response.content[0].text : "",
+          response.content[0].type === "text" ? response.content[0].text : ""
         );
       }
     }
@@ -162,6 +162,8 @@ class MCPClient {
         const response = await this.processQuery(message);
         console.log("\n" + response);
       }
+    } catch (e) {
+      console.log("Error: ", e);
     } finally {
       rl.close();
     }
