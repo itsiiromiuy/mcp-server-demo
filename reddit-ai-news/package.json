@@ -1,0 +1,31 @@
+{
+  "name": "reddit-ai-news",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && chmod 755 build/index.js",
+    "start": "node build/index.js",
+    "dev": "tsc -w"
+  },
+  "keywords": ["reddit", "ai", "llm", "news", "mcp"],
+  "author": "",
+  "license": "ISC",
+  "description": "Reddit AI/LLM news retrieval service using Model Context Protocol",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "axios": "^1.6.8",
+    "zod": "^3.24.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "^5.8.3"
+  },
+  "bin": {
+    "reddit-ai-news": "./build/index.js"
+  },
+  "files": [
+    "build"
+  ]
+}
