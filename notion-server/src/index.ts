@@ -7,9 +7,7 @@ import type {
   CreateDatabaseParameters,
   DatabaseObjectResponse,
   UpdatePageParameters,
-  SelectPropertyItemObjectResponse,
   NumberPropertyItemObjectResponse,
-  DatePropertyItemObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints.js";
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -698,10 +696,15 @@ async function registerTools(
             },
             {
               object: "block",
-              type: "paragraph",
-              paragraph: {
-                rich_text: [{ text: { content: answer } }],
-              },
+              type: "divider",
+              divider: {},
+            },
+            // Convert JSON response to structured blocks
+            ...convertResponseToBlocks(answer),
+            {
+              object: "block",
+              type: "divider",
+              divider: {},
             },
           ],
         })) as PageObjectResponse;
@@ -1404,6 +1407,190 @@ async function checkExistingDatabase(notion: Client, databaseId: string) {
     }
     return null;
   }
+}
+
+// Add helper function to convert response to Notion blocks
+function convertResponseToBlocks(content: string): any[] {
+  try {
+    // Try to parse as JSON first
+    const jsonContent = JSON.parse(content);
+    return convertJsonToBlocks(jsonContent);
+  } catch (e) {
+    // If not JSON, process as regular text with markdown-like syntax
+    return convertTextToBlocks(content);
+  }
+}
+
+function convertJsonToBlocks(json: any): any[] {
+  const blocks: any[] = [];
+
+  // Handle different response structures
+  if (json.content) {
+    // Handle MCP-style response
+    blocks.push({
+      object: "block",
+      type: "callout",
+      callout: {
+        rich_text: [{ text: { content: "API Response" } }],
+        icon: { emoji: "🔄" },
+        color: "blue_background",
+      },
+    });
+
+    json.content.forEach((item: any) => {
+      if (item.type === "text") {
+        blocks.push(...convertTextToBlocks(item.text));
+      } else if (item.type === "code") {
+        blocks.push({
+          object: "block",
+          type: "code",
+          code: {
+            rich_text: [{ text: { content: item.code } }],
+            language: item.language || "plain text",
+          },
+        });
+      }
+    });
+  } else {
+    // Handle regular JSON structure
+    blocks.push({
+      object: "block",
+      type: "code",
+      code: {
+        rich_text: [{ text: { content: JSON.stringify(json, null, 2) } }],
+        language: "json",
+      },
+    });
+  }
+
+  return blocks;
+}
+
+function convertTextToBlocks(text: string): any[] {
+  const blocks: any[] = [];
+  const lines = text.split("\n");
+  let currentCodeBlock: string[] = [];
+  let inCodeBlock = false;
+
+  lines.forEach((line) => {
+    // Code block handling
+    if (line.startsWith("```")) {
+      if (inCodeBlock) {
+        // End code block
+        blocks.push({
+          object: "block",
+          type: "code",
+          code: {
+            rich_text: [{ text: { content: currentCodeBlock.join("\n") } }],
+            language: "plain text",
+          },
+        });
+        currentCodeBlock = [];
+        inCodeBlock = false;
+      } else {
+        // Start code block
+        inCodeBlock = true;
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      currentCodeBlock.push(line);
+      return;
+    }
+
+    // Heading handling
+    if (line.startsWith("# ")) {
+      blocks.push({
+        object: "block",
+        type: "heading_1",
+        heading_1: {
+          rich_text: [{ text: { content: line.slice(2) } }],
+        },
+      });
+      return;
+    }
+
+    if (line.startsWith("## ")) {
+      blocks.push({
+        object: "block",
+        type: "heading_2",
+        heading_2: {
+          rich_text: [{ text: { content: line.slice(3) } }],
+        },
+      });
+      return;
+    }
+
+    if (line.startsWith("### ")) {
+      blocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: {
+          rich_text: [{ text: { content: line.slice(4) } }],
+        },
+      });
+      return;
+    }
+
+    // List handling
+    if (line.startsWith("- ")) {
+      blocks.push({
+        object: "block",
+        type: "bulleted_list_item",
+        bulleted_list_item: {
+          rich_text: [{ text: { content: line.slice(2) } }],
+        },
+      });
+      return;
+    }
+
+    if (line.match(/^\d+\. /)) {
+      blocks.push({
+        object: "block",
+        type: "numbered_list_item",
+        numbered_list_item: {
+          rich_text: [{ text: { content: line.replace(/^\d+\. /, "") } }],
+        },
+      });
+      return;
+    }
+
+    // Callout handling
+    if (line.startsWith("> ")) {
+      blocks.push({
+        object: "block",
+        type: "callout",
+        callout: {
+          rich_text: [{ text: { content: line.slice(2) } }],
+          icon: { emoji: "💡" },
+        },
+      });
+      return;
+    }
+
+    // Regular paragraph
+    if (line.trim()) {
+      blocks.push({
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [{ text: { content: line } }],
+        },
+      });
+    } else {
+      // Empty line
+      blocks.push({
+        object: "block",
+        type: "paragraph",
+        paragraph: {
+          rich_text: [],
+        },
+      });
+    }
+  });
+
+  return blocks;
 }
 
 // Run the main function
